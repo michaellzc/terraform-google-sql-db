@@ -26,10 +26,6 @@ locals {
 
   databases = { for db in var.additional_databases : db.name => db }
   users     = { for u in var.additional_users : u.name => u }
-  iam_users = [for iu in var.iam_user_emails : {
-    email         = iu,
-    is_account_sa = trimsuffix(iu, "gserviceaccount.com") == iu ? false : true
-  }]
 
   retained_backups = lookup(var.backup_configuration, "retained_backups", null)
   retention_unit   = lookup(var.backup_configuration, "retention_unit", null)
@@ -209,32 +205,30 @@ resource "google_sql_user" "additional_users" {
 }
 
 resource "google_project_iam_member" "iam_binding" {
-  for_each = {
-    for iu in local.iam_users :
-    "${iu.email} ${iu.is_account_sa}" => iu
-  }
+  count   = length(var.iam_user_emails)
   project = var.project_id
   role    = "roles/cloudsql.instanceUser"
-  member = each.value.is_account_sa ? (
-    "serviceAccount:${each.value.email}"
+  member = trimsuffix(var.iam_user_emails[count.index], "gserviceaccount.com") == var.iam_user_emails[count.index] ? (
+    "user:${var.iam_user_emails[count.index]}"
     ) : (
-    "user:${each.value.email}"
+    "serviceAccount:${var.iam_user_emails[count.index]}"
   )
 }
 
 resource "google_sql_user" "iam_account" {
-  for_each = {
-    for iu in local.iam_users :
-    "${iu.email} ${iu.is_account_sa}" => iu
-  }
+  count   = length(var.iam_user_emails)
   project = var.project_id
-  name = each.value.is_account_sa ? (
-    trimsuffix(each.value.email, ".gserviceaccount.com")
+  name = trimsuffix(var.iam_user_emails[count.index], "gserviceaccount.com") == var.iam_user_emails[count.index] ? (
+    var.iam_user_emails[count.index]
     ) : (
-    each.value.email
+    trimsuffix(var.iam_user_emails[count.index], ".gserviceaccount.com")
   )
   instance = google_sql_database_instance.default.name
-  type     = each.value.is_account_sa ? "CLOUD_IAM_SERVICE_ACCOUNT" : "CLOUD_IAM_USER"
+  type = trimsuffix(var.iam_user_emails[count.index], "gserviceaccount.com") == var.iam_user_emails[count.index] ? (
+    "CLOUD_IAM_USER"
+    ) : (
+    "CLOUD_IAM_SERVICE_ACCOUNT"
+  )
 
   depends_on = [
     null_resource.module_depends_on,
